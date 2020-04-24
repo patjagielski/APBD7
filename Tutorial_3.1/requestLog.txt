@@ -1,0 +1,9 @@
+POST
+/api/students
+{ 
+	"login":"s1234",
+	"password":"admin123",
+	"refreshtoken":"3e9f9ae4-d29b-46f7-b499-91d463fe22f0"
+	
+}
+
