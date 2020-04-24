@@ -27,7 +27,194 @@ namespace Tutorial_3._1.Controllers
             _configuration = configuration;
 
         }
+        //APBD7
+        [HttpPost]
+        public IActionResult Login(LoginRequestDTO loginRequestDTO)
+        {
+            var salt = CreateSalt();
+            var password = CreateHash(loginRequestDTO.password, salt);
+            var flag = true;
+            var answer = 0;
+            using (var sqlConnection = new SqlConnection(@"Data Source=db-mssql;Initial Catalog=s19696;Integrated Security=True"))
+            {
+                using (var command = new SqlCommand())
+                {
+                    command.Connection = sqlConnection;
+                    command.CommandText = $"Select count(IndexNumber) as counting from Student where IndexNumber = '{loginRequestDTO.login}'" +
+                                          $" and StudentPassword = '{loginRequestDTO.password}';";
 
+                    sqlConnection.Open();
+                    var response = command.ExecuteReader();
+                    while (response.Read())
+                    {
+                        answer = Convert.ToInt32(response["counting"]);
+                        if (answer > 0)
+                        {
+                            flag = true;
+
+                        }
+                        else
+                        {
+                            flag = false;
+                            return Ok("Nothing here");
+
+                        }
+                    }
+                    sqlConnection.Close();
+                }
+            }
+
+            if (flag)
+            {
+
+                var claims = new[]
+                {
+                        new Claim(ClaimTypes.NameIdentifier, "1"),
+                        new Claim(ClaimTypes.Name, "bob123"),
+                        new Claim(ClaimTypes.Role, "admin"),
+                        new Claim(ClaimTypes.Role, "employee"),
+                };
+                var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["Secrekey"]));
+                var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+                var token = new JwtSecurityToken
+                    (
+                    issuer: "Gakko",
+                    audience: "Students",
+                    claims: claims,
+                    expires: DateTime.Now.AddMinutes(10),
+                    signingCredentials: credentials
+                    );
+                var token1 = new JwtSecurityTokenHandler().WriteToken(token);
+                var refreshToken1 = Guid.NewGuid();
+                Console.WriteLine(token1);
+                Console.WriteLine(refreshToken1);
+                InsertToken(refreshToken1.ToString(), loginRequestDTO.password, loginRequestDTO.login, password);
+
+
+                return Ok(new
+                {
+                    token1,
+                    refreshToken1
+                });
+            }
+            else
+            {
+                return NotFound();
+            }
+
+        }
+        public void InsertToken(string token, String password, String login, string hashedpassword)
+        {
+            using (var sqlConnection = new SqlConnection(@"Data Source=db-mssql;Initial Catalog=s19696;Integrated Security=True"))
+            {
+                using (var command = new SqlCommand())
+                {
+                    sqlConnection.Open();
+                    SqlTransaction transaction;
+                    transaction = sqlConnection.BeginTransaction();
+                    command.Connection = sqlConnection;
+                    command.Transaction = transaction;
+                    command.Connection = sqlConnection;
+                    command.CommandText = $"Update Student set refreshToken = '{token}' " +
+                                    $"where StudentPassword = '{password}' and IndexNumber = '{login}'";
+
+                    
+                    var response = command.ExecuteReader();
+
+                    
+                }
+                using (var command = new SqlCommand())
+                {
+                    
+                    command.CommandText = $"Update Student set StudentPassword = '{hashedpassword}' " +
+                                    $"where refreshToken = '{token}' and IndexNumber = '{login}';";
+                    transaction.Commit();
+                    var response = command.ExecuteReader();
+
+                    sqlConnection.Close();
+                }
+            }
+        }
+
+        //Task2
+        [HttpPost("refresh-token")]
+        public IActionResult RefreshToken(LoginRequestDTO loginRequestDTO)
+        {
+
+            var refreshTokendb = "";
+            using (var sqlConnection = new SqlConnection(@"Data Source=db-mssql;Initial Catalog=s19696;Integrated Security=True"))
+            {
+                using (var command = new SqlCommand())
+                {
+                    command.Connection = sqlConnection;
+                    sqlConnection.Open();
+                    command.CommandText = $"Select '{loginRequestDTO.refreshToken}' as token from Student where IndexNumber = '{loginRequestDTO.login}';";
+
+                    var response = command.ExecuteReader();
+                    while (response.Read())
+                    {
+                        refreshTokendb = response["token"].ToString();
+                    }
+
+                }
+                sqlConnection.Close();
+            }
+            var claims = new[]
+           {
+                        new Claim(ClaimTypes.NameIdentifier, "1"),
+                        new Claim(ClaimTypes.Name, "bob123"),
+                        new Claim(ClaimTypes.Role, "admin"),
+                        new Claim(ClaimTypes.Role, "employee")
+            };
+            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["Secrekey"]));
+            var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+            var token = new JwtSecurityToken
+                (
+                issuer: "Gakko",
+                audience: "Students",
+                claims: claims,
+                expires: DateTime.Now.AddMinutes(10),
+                signingCredentials: credentials
+                );
+
+            var token1 = new JwtSecurityTokenHandler().WriteToken(token);
+            if (refreshTokendb == loginRequestDTO.refreshToken)
+            {
+                return Ok(new
+                {
+                    token1
+
+                });
+            }
+            else
+            {
+                return BadRequest("Such token is not in the database");
+            }
+        }
+
+        public string CreateHash(string value, string salt)
+        {
+            var valueBytes = KeyDerivation.Pbkdf2(
+                password: value,
+                salt: Encoding.UTF8.GetBytes(salt),
+                prf: KeyDerivationPrf.HMACSHA512,
+                iterationCount: 20000,
+                numBytesRequested: 256 / 8
+                );
+            return Convert.ToBase64String(valueBytes);
+        }
+
+        public static string CreateSalt()
+        {
+            byte[] randomBytes = new byte[128 / 8];
+            using (var generator = RandomNumberGenerator.Create())
+            {
+                generator.GetBytes(randomBytes);
+                return Convert.ToBase64String(randomBytes);
+            }
+        }
         [HttpGet]
         public IActionResult CreateStudent()
         {
@@ -123,220 +310,13 @@ namespace Tutorial_3._1.Controllers
 
         }
 
-        [HttpPost]
-        public IActionResult Login(LoginRequestDTO loginRequestDTO)
-        {
-            var salt = CreateSalt();
-            var password = CreateHash(loginRequestDTO.password, salt);
-            var flag = true;
-            var answer = 0;
-            using (var sqlConnection = new SqlConnection(@"Data Source=db-mssql;Initial Catalog=s19696;Integrated Security=True"))
-            {
-                using (var command = new SqlCommand())
-                {
-                    command.Connection = sqlConnection;
-                    command.CommandText = $"Select count(IndexNumber) as counting from Student where IndexNumber = '{loginRequestDTO.login}'" +
-                                          $" and StudentPassword = '{loginRequestDTO.password}';";
-
-                    sqlConnection.Open();
-                    var response = command.ExecuteReader();
-                    while (response.Read())
-                    {
-                        answer = Convert.ToInt32(response["counting"]);
-                        if(answer > 0)
-                        {
-                            flag = true;
-                            
-                        }
-                        else
-                        {
-                            flag = false;
-                            return Ok   ("Nothing here");
-                            
-                        }
-                    }
-                    sqlConnection.Close();
-                }
-            }
-           
-            if (flag)
-            {
-
-                var claims = new[]
-                {
-                        new Claim(ClaimTypes.NameIdentifier, "1"),
-                        new Claim(ClaimTypes.Name, "bob123"),
-                        new Claim(ClaimTypes.Role, "admin"),
-                        new Claim(ClaimTypes.Role, "employee"),
-                };
-                var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["Secrekey"]));
-                var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
-                var token = new JwtSecurityToken
-                    (
-                    issuer: "Gakko",
-                    audience: "Students",
-                    claims: claims,
-                    expires: DateTime.Now.AddMinutes(10),
-                    signingCredentials: credentials
-                    );
-                var token1 = new JwtSecurityTokenHandler().WriteToken(token);
-                var refreshToken1 = Guid.NewGuid();
-                Console.WriteLine(token1);
-                Console.WriteLine(refreshToken1);
-                InsertToken(refreshToken1.ToString(), loginRequestDTO.password, loginRequestDTO.login, password);
-
-
-                return Ok(new
-                {
-                    token1,
-                    refreshToken1
-                });
-            }
-            else
-            {
-                return NotFound();
-            }
-
-        }
-        public void InsertToken(string token, String password, String login, string hashedpassword)
-        {
-            using (var sqlConnection = new SqlConnection(@"Data Source=db-mssql;Initial Catalog=s19696;Integrated Security=True"))
-            {
-                using (var command = new SqlCommand())
-                {
-                    sqlConnection.Open();
-                    SqlTransaction transaction;
-                    transaction = sqlConnection.BeginTransaction();
-                    command.Connection = sqlConnection;
-                    command.Transaction = transaction;
-                    command.Connection = sqlConnection;
-                    command.CommandText = $"Update Student set refreshToken = '{token}' " +
-                                    $"where StudentPassword = '{password}' and IndexNumber = '{login}'";
-
-                   
-                    
-                    command.CommandText = $"Update Student set StudentPassword = '{hashedpassword}' " +
-                                    $"where refreshToken = '{token}' and IndexNumber = '{login}';";
-                    transaction.Commit();
-                    var response = command.ExecuteReader();
-                    
-                    sqlConnection.Close();
-                }
-            }
-        }
-
-        //Task2
-        [HttpPost("refresh-token")]
-        public IActionResult RefreshToken(LoginRequestDTO loginRequestDTO)
-        {
-            
-            var refreshTokendb = "";
-            using (var sqlConnection = new SqlConnection(@"Data Source=db-mssql;Initial Catalog=s19696;Integrated Security=True"))
-            {
-                using (var command = new SqlCommand())
-                {
-                    command.Connection = sqlConnection;
-                    sqlConnection.Open();
-                    command.CommandText = $"Select '{loginRequestDTO.refreshToken}' as token from Student where IndexNumber = '{loginRequestDTO.login}';";
-
-                    var response = command.ExecuteReader();
-                    while (response.Read())
-                    {
-                        refreshTokendb = response["token"].ToString();
-                    }
-
-                }
-                sqlConnection.Close();
-            }
-            var claims = new[]
-           {
-                        new Claim(ClaimTypes.NameIdentifier, "1"),
-                        new Claim(ClaimTypes.Name, "bob123"),
-                        new Claim(ClaimTypes.Role, "admin"),
-                        new Claim(ClaimTypes.Role, "employee")
-            };
-            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["Secrekey"]));
-            var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
-            var token = new JwtSecurityToken
-                (
-                issuer: "Gakko",
-                audience: "Students",
-                claims: claims,
-                expires: DateTime.Now.AddMinutes(10),
-                signingCredentials: credentials
-                );
-            
-            var token1 = new JwtSecurityTokenHandler().WriteToken(token);
-            if (refreshTokendb == loginRequestDTO.refreshToken)
-            {
-                return Ok(new
-                {
-                    token1
-
-                });
-            }
-            else
-            {
-                return BadRequest("Such token is not in the database");
-            }
-        }
-
-        public string CreateHash(string value, string salt)
-        {
-            var valueBytes = KeyDerivation.Pbkdf2(
-                password: value,
-                salt: Encoding.UTF8.GetBytes(salt),
-                prf: KeyDerivationPrf.HMACSHA512,
-                iterationCount: 20000,
-                numBytesRequested: 256 / 8
-                );
-            return Convert.ToBase64String(valueBytes);
-        }
-
-        public static string CreateSalt()
-        {
-            byte[] randomBytes = new byte[128 / 8];
-            using (var generator = RandomNumberGenerator.Create())
-            {
-                generator.GetBytes(randomBytes);
-                return Convert.ToBase64String(randomBytes);
-            }
-        }
+       
 
 
 
 
-        /*  [HttpPost]
-          public IActionResult CreateStudent(Models.Student student)
-          {
-              student.IndexNumber = $"s{new Random().Next(1, 20000)}";
-
-              return Ok(student);
-
-          }
-          [HttpPut]
-          public IActionResult PutStudent([FromBody] Models.Student student)
-          {
-              student.FirstName = "Mark";
-
-              return Ok("Update complete");
-
-          }
-          [HttpDelete]
-          public IActionResult DeleteStudent([FromBody] Models.Student student)
-          {
-              if(student.IdStudent == 1)
-              {
-                  return Ok("Delete complete");
-              }
-              else
-              {
-                  return NotFound("That student id does not exist");
-              }
-          }
-      }*/
+       
+      
 
     }
 }
